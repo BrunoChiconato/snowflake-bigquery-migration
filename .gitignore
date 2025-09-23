@@ -170,3 +170,4 @@ poetry.toml
 pyrightconfig.json
 
 *.csv
+keys/
