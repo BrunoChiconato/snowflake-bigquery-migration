@@ -13,14 +13,14 @@ graph TD
     classDef gcp_governance fill:#EA4335,stroke:#333,stroke-width:2px,color:#fff
     classDef gcp_ops fill:#6c757d,stroke:#333,stroke-width:2px,color:#fff
 
-    subgraph PHASE_0["Phase 0: Planning"]
+    subgraph PHASE_0["Phase 1: Planning"]
         direction LR
         MSVC["BigQuery Migration Service"]
         PLAN["Governance & Security Plan"]
         MSVC --> |Analyzes SQL & Logs| PLAN
     end
 
-    subgraph PIPELINE["Phase 1: Automation"]
+    subgraph PIPELINE["Phase 2: Automation"]
         COMPOSER{{Cloud Composer - Airflow}}:::gcp_orchestration
 
         direction LR
@@ -37,7 +37,7 @@ graph TD
         BIGQUERY -.->|Target for Validation| DVT
     end
 
-    subgraph OPS_GOV["Phase 2: Governance"]
+    subgraph OPS_GOV["Phase 3: Governance"]
         direction LR
         IAM["IAM"]:::gcp_governance
         MONLOG["Cloud Monitoring & Logging"]:::gcp_ops
