@@ -309,3 +309,79 @@ After a few minutes, the assessment report will be generated and available for v
 ![Queries Performed](./images/assessment-report-2.png)
 ![Query Translation](./images/assessment-report-3.png)
 ![PoC Summary](./images/assessment-report-4.png)
+
+## Phase 3: Data Extraction (Unloading from Snowflake to GCS)
+
+This phase covers the setup of the data extraction pipeline, which unloads data from the Snowflake table into a Google Cloud Storage (GCS) bucket, preparing it for ingestion into BigQuery.
+
+### 1. Create a Storage Integration for GCS in Snowflake
+
+First, create a `STORAGE INTEGRATION` object in Snowflake to allow it to securely connect to Google Cloud Storage.
+
+> **Note:** Only users with the `ACCOUNTADMIN` role or a global `CREATE INTEGRATION` privilege can execute this command.
+
+```sql
+CREATE STORAGE INTEGRATION GCS_INTEGRATION
+  TYPE = EXTERNAL_STAGE
+  STORAGE_PROVIDER = 'GCS'
+  ENABLED = TRUE
+  STORAGE_ALLOWED_LOCATIONS = ('gcs://your-gcs-bucket-name/path/');
+```
+
+### 2. Grant Snowflake Access to the GCS Bucket
+
+Now, you must configure permissions in Google Cloud IAM to allow Snowflake to write to your GCS bucket.
+
+**2a. Retrieve the Snowflake Service Account**
+
+Execute the `DESCRIBE INTEGRATION` command in Snowflake to get the ID of the service account that Snowflake created for your GCP integration.
+
+```sql
+DESC STORAGE INTEGRATION GCS_INTEGRATION;
+```
+
+Find and copy the value from the `STORAGE_GCP_SERVICE_ACCOUNT` property. It will look like `service-account-id@project-id.iam.gserviceaccount.com`.
+
+**2b. Create a Custom IAM Role in GCP**
+
+In the Google Cloud console, create a custom IAM role with the necessary permissions for Snowflake to unload data.
+
+1.  Navigate to **IAM & Admin » Roles**.
+2.  Click **Create Role**.
+3.  Provide a **Title** (e.g., `Snowflake GCS Unload Role`).
+4.  Click **Add Permissions** and add the permissions required for "Data unloading only".
+
+| Action for Unloading Data | Required GCP IAM Permissions |
+| :--- | :--- |
+| **Data Unloading Only** | `storage.buckets.get` <br> `storage.objects.create` <br> `storage.objects.delete` <br> `storage.objects.list` |
+
+5.  Click **Create**.
+
+**2c. Assign the Custom Role to the Snowflake Service Account**
+
+1.  Navigate to **Cloud Storage » Buckets** and select your target GCS bucket.
+2.  Go to the **Permissions** tab and click **Grant Access**.
+3.  In the **New principals** field, paste the Snowflake service account ID you copied earlier.
+4.  In the **Assign roles** dropdown, select the custom IAM role (`Snowflake GCS Unload Role`) you just created.
+5.  Click **Save**.
+
+### 3. Create an External Stage for GCS in Snowflake
+
+This stage object in Snowflake points to your GCS bucket using the secure integration.
+
+```sql
+CREATE OR REPLACE STAGE GCS_UNLOAD_STAGE
+  URL = 'gcs://your-gcs-bucket-name/path/'
+  STORAGE_INTEGRATION = GCS_INTEGRATION;
+```
+
+### 4. Unload Data from Snowflake to GCS
+
+Use the `COPY INTO <location>` command to unload the data from your `ONLINE_LIBRARY_EVENTS` table into the GCS bucket via the stage. The data will be written as compressed files.
+
+```sql
+COPY INTO @GCS_UNLOAD_STAGE/online_library_events/
+FROM ONLINE_LIBRARY_EVENTS;
+```
+
+With this, the data has been successfully extracted from Snowflake and is now staged in Google Cloud Storage, ready for the next phase: ingestion into BigQuery.
