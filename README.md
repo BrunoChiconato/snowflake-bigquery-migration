@@ -312,7 +312,14 @@ After a few minutes, the assessment report will be generated and available for v
 
 ## Phase 3: Data Extraction (Unloading from Snowflake to GCS)
 
-This phase covers the setup of the data extraction pipeline, which unloads data from the Snowflake table into a Google Cloud Storage (GCS) bucket, preparing it for ingestion into BigQuery.
+This phase sets up the pipeline that unloads data from Snowflake into a Google Cloud Storage (GCS) bucket in a format optimized for loading into BigQuery.
+
+> **Why Parquet + Snappy?** BigQuery natively ingests Parquet and recommends row groups of **≥ 16 MiB** for optimal performance; Parquet is columnar and self-describing, which improves load speed and schema handling compared to CSV. Snappy compression is supported and efficient for Parquet loads.
+
+> **Why adjust file size?** We increase Snowflake’s `MAX_FILE_SIZE` so each unload produces fewer, reasonably large files to reduce overhead while maintaining good parallelism when BigQuery loads from Cloud Storage (Google’s guidance is to keep files ~**≤ 256 MB** for parallelized loads).
+
+> **Note on CSV gzip:** For CSV sources, gzip slows BigQuery loads because it can’t read gzip in parallel; this does **not** apply to Parquet.
+
 
 ### 1. Create a Storage Integration for GCS in Snowflake
 
@@ -365,23 +372,38 @@ In the Google Cloud console, create a custom IAM role with the necessary permiss
 4.  In the **Assign roles** dropdown, select the custom IAM role (`Snowflake GCS Unload Role`) you just created.
 5.  Click **Save**.
 
-### 3. Create an External Stage for GCS in Snowflake
+### 3. Create a Parquet File Format (Snappy)
+
+Define a reusable file format for Parquet with Snappy compression. (Parquet+Snappy is the default for unloading and is fully supported.) :contentReference[oaicite:3]{index=3}
+
+```sql
+CREATE OR REPLACE FILE FORMAT PARQUET_ONLINE_LIBRARY
+  TYPE = PARQUET
+  COMPRESSION = SNAPPY; -- default for Parquet unloads
+```
+
+### 4. Create an External Stage for GCS in Snowflake
 
 This stage object in Snowflake points to your GCS bucket using the secure integration.
 
 ```sql
 CREATE OR REPLACE STAGE GCS_UNLOAD_STAGE
   URL = 'gcs://your-gcs-bucket-name/path/'
-  STORAGE_INTEGRATION = GCS_INTEGRATION;
+  STORAGE_INTEGRATION = GCS_INTEGRATION
+  FILE_FORMAT = PARQUET_ONLINE_LIBRARY;
 ```
 
-### 4. Unload Data from Snowflake to GCS
+### 5. Unload Data from Snowflake to GCS
 
-Use the `COPY INTO <location>` command to unload the data from your `ONLINE_LIBRARY_EVENTS` table into the GCS bucket via the stage. The data will be written as compressed files.
+Use `COPY INTO <location>` to unload the table as Parquet+Snappy and increase `MAX_FILE_SIZE` to target fewer, moderately large files.
+`MAX_FILE_SIZE` is an **upper bound** (in bytes); Snowflake may emit smaller files depending on resources and parallelism. Default is **16 MB**; here we use **256 MB** as a practical target.
 
 ```sql
-COPY INTO @GCS_UNLOAD_STAGE/online_library_events/
-FROM ONLINE_LIBRARY_EVENTS;
+COPY INTO @GCS_ONLINE_LIBRARY_EVENTS
+FROM ONLINE_LIBRARY_EVENTS
+MAX_FILE_SIZE = 268435456   -- 256 MB upper bound (per file, per thread)
+INCLUDE_QUERY_ID = TRUE     -- helps avoid duplicates on retries
+DETAILED_OUTPUT = TRUE;     -- optional: returns per-file stats
 ```
 
-With this, the data has been successfully extracted from Snowflake and is now staged in Google Cloud Storage, ready for the next phase: ingestion into BigQuery.
+With this, the data has been successfully extracted as **Parquet + Snappy** from Snowflake and is now staged in Google Cloud Storage, ready for the next phase: ingestion into BigQuery.
